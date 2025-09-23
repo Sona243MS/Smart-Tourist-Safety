@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+html, body, #root {
+  height: 100%;
+}
+
+/* Utility tweak for min width chip */
+.min-w-\[28px\] { min-width: 28px; }

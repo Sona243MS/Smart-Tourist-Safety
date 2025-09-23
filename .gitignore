@@ -1,0 +1,16 @@
+# Node/React
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.env
+.DS_Store
+
+# App data
+tourist-safety-backend/tourist-safety.json
+
+# OS/IDE
+Thumbs.db
+.vscode/
+.idea/

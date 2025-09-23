@@ -1,0 +1,17 @@
+version: "3.9"
+services:
+  backend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && node index.js"
+    ports:
+      - "3000:3000"
+    environment:
+      - USE_SQLITE=1
+      - SQLITE_DB_PATH=/app/data/tourist-safety.db
+    volumes:
+      - ./tourist-safety-backend:/app
+      - backend_data:/app/data
+    restart: unless-stopped
+volumes:
+  backend_data:

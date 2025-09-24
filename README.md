@@ -109,3 +109,6 @@ git push -u origin feature/your-change
 - CORS/SSE are enabled for local dev.
 - Tailwind v3 is configured for CRA 5 in the mobile app.
 - DB mode endpoint: `GET /db-mode` → `{ mode: 'sqlite' | 'json' }`.
+
+## Working links:
+Backend - https://smart-tourist-safety-v1xd.onrender.com/                                                                                                                                 Mobile app - https://smart-tourist-safety-7aa08-mobile.web.app/                                                                                                                           Dashboard - https://smart-tourist-safety-7aa08-dash.web.app/

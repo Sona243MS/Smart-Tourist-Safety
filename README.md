@@ -57,6 +57,12 @@ npm start
 - Safety score per region (0–900, sample heuristic) displayed on dashboard and mobile.
 - Mobile app: SOS, offline queue, QR ID, safety banner, emergency contacts, language toggle (English/Assamese), share location, and soft alerts ("I'm safe", "Low battery").
 
+### New (NE Languages, Assam focus, Safety Credit, Digital ID)
+- North-Eastern languages in mobile: Assamese, Bengali (bn), Bodo (brx) with placeholders for Manipuri (mni), Khasi (kha), Garo (grt), Mizo (lus) and English fallback.
+- Assam tourist spots seeded as geofences (demo polygons): Kaziranga, Kamakhya, Umananda, Majuli, Pobitora.
+- Safety Credit (CIBIL-like) score per region/place: `GET /safety-credit?regionId=assam&placeId=kamakhya`.
+- Digital ID (DID) issuance and verification with signed JWTs: `POST /did/issue`, `POST /did/verify`. Mobile auto-attaches `Authorization: Bearer <token>`.
+
 ## Endpoints (Backend)
 - `POST /panic-alert` – Create an emergency incident.
 - `POST /soft-alert` – Create a soft status incident (type: `safe` | `low_battery` | `status`).
@@ -66,6 +72,9 @@ npm start
 - `GET /incidents/export?regionId=...&minutes=...` – CSV export.
 - `GET /geofences` / `POST /geofences` – Manage geofences.
 - `GET /safety-score?regionId=...` – Region safety score.
+- `GET /safety-credit?regionId=...&placeId=...&days=...` – Safety Credit Score with component breakdown.
+- `POST /did/issue` – Issue a signed DID token (JWT). Body: `{ kycType, kycHash, validDays }`.
+- `POST /did/verify` – Verify a DID token. Body: `{ token }`.
 
 ## Demo Script
 1. Seed or verify North-East geofences on backend (`ne-shillong-central`, `ne-guwahati-central`). These auto-seed on first run.
@@ -86,6 +95,9 @@ npm start
 Contacts are now region-aware from the backend.
 - Backend: `GET /regions` returns `{ id, name, contacts[] }`.
 - Mobile: `mobile-app/src/App.js` fetches regions on load and shows `contacts` from the current `regionId` (fallback `default`).
+
+## Languages
+- Mobile UI supports: English (`en`), Assamese (`as`), Bengali (`bn`), Bodo (`brx`), with placeholders for Manipuri (`mni`), Khasi (`kha`), Garo (`grt`), Mizo (`lus`). Missing keys fall back to English.
 
 ## Screenshots
 Add screenshots to `docs/` and reference here:
@@ -109,3 +121,24 @@ git push -u origin feature/your-change
 - CORS/SSE are enabled for local dev.
 - Tailwind v3 is configured for CRA 5 in the mobile app.
 - DB mode endpoint: `GET /db-mode` → `{ mode: 'sqlite' | 'json' }`.
+
+## Deployment (Firebase Hosting for frontends)
+To host Dashboard and Mobile under one Firebase project:
+1. Create `.env.production` in `dashboard/` and `mobile-app/` with:
+   - `REACT_APP_API_BASE=https://YOUR-BACKEND.onrender.com`
+2. Build frontends:
+   - `cd dashboard && npm install && npm run build`
+   - `cd ../mobile-app && npm install && npm run build`
+3. In repo root, set up multi-site hosting:
+   - `firebase login`
+   - `firebase hosting:sites:create <dashboard-site-id>`
+   - `firebase hosting:sites:create <mobile-site-id>`
+   - `firebase init hosting` → use existing project → not single-site
+   - `firebase target:apply hosting dashboard <dashboard-site-id>`
+   - `firebase target:apply hosting mobile <mobile-site-id>`
+4. Ensure `firebase.json` maps:
+   - Dashboard → `public: dashboard/build`, SPA rewrites
+   - Mobile → `public: mobile-app/build`, SPA rewrites
+5. Deploy:
+   - `firebase deploy --only hosting:dashboard`
+   - `firebase deploy --only hosting:mobile`

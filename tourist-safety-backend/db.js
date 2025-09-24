@@ -61,6 +61,16 @@ function load() {
         ],
         metadata: {},
       },
+      {
+        id: 'assam',
+        name: 'Assam',
+        contacts: [
+          { label: 'Police', phone: '100' },
+          { label: 'Ambulance', phone: '108' },
+          { label: 'Disaster Mgmt', phone: '1070' },
+        ],
+        metadata: { state: 'Assam' },
+      },
     ];
     persist();
   }
@@ -109,6 +119,72 @@ function init() {
             [26.165, 91.726],
           ],
         },
+        // Assam tourist spots (approximate boxes/polylines for demo; replace with accurate polygons later)
+        {
+          id: 'assam-kaziranga-central',
+          name: 'Kaziranga National Park (Central Range)',
+          regionId: 'assam',
+          riskLevel: 'yellow',
+          polygon: [
+            [26.585, 93.350],
+            [26.585, 93.430],
+            [26.510, 93.430],
+            [26.510, 93.350],
+          ],
+          meta: { placeId: 'kaziranga' },
+        },
+        {
+          id: 'assam-kamakhya-temple',
+          name: 'Kamakhya Temple',
+          regionId: 'assam',
+          riskLevel: 'yellow',
+          polygon: [
+            [26.172, 91.698],
+            [26.172, 91.705],
+            [26.166, 91.705],
+            [26.166, 91.698],
+          ],
+          meta: { placeId: 'kamakhya' },
+        },
+        {
+          id: 'assam-umananda-island',
+          name: 'Umananda Island',
+          regionId: 'assam',
+          riskLevel: 'yellow',
+          polygon: [
+            [26.192, 91.749],
+            [26.192, 91.754],
+            [26.188, 91.754],
+            [26.188, 91.749],
+          ],
+          meta: { placeId: 'umananda' },
+        },
+        {
+          id: 'assam-majuli',
+          name: 'Majuli River Island',
+          regionId: 'assam',
+          riskLevel: 'yellow',
+          polygon: [
+            [26.980, 94.140],
+            [26.980, 94.300],
+            [26.820, 94.300],
+            [26.820, 94.140],
+          ],
+          meta: { placeId: 'majuli' },
+        },
+        {
+          id: 'assam-pobitora',
+          name: 'Pobitora Wildlife Sanctuary',
+          regionId: 'assam',
+          riskLevel: 'yellow',
+          polygon: [
+            [26.258, 91.961],
+            [26.258, 92.010],
+            [26.220, 92.010],
+            [26.220, 91.961],
+          ],
+          meta: { placeId: 'pobitora' },
+        },
       ];
       state.geofences = [...(state.geofences || []), ...seed];
       persist();
@@ -155,7 +231,7 @@ function createIncident({ touristId = null, deviceId = null, latitude, longitude
   // keep array reasonably bounded
   if (state.incidents.length > 5000) state.incidents = state.incidents.slice(-3000);
   persist();
-  return { id };
+  return row;
 }
 
 function listIncidents({ limit = 100 } = {}) {

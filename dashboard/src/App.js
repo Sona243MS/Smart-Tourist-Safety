@@ -1,13 +1,18 @@
 import './App.css';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import logo from './assets/logo.svg';
 import axios from 'axios';
 import MapView from './MapView';
+// Configure API base URL for production deployments (Netlify/Vercel, etc.)
+if (process.env.REACT_APP_API_BASE) {
+  axios.defaults.baseURL = process.env.REACT_APP_API_BASE;
+}
 
 function App() {
   const [alerts, setAlerts] = useState([]);
   const [geofences, setGeofences] = useState([]);
   const [score, setScore] = useState(null);
+  const [credit, setCredit] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [liveStatus, setLiveStatus] = useState('disconnected'); // disconnected | connecting | connected
@@ -18,6 +23,8 @@ function App() {
   const [dark, setDark] = useState(false);
   const [regions, setRegions] = useState(['default', 'shillong', 'guwahati']);
   const [dbMode, setDbMode] = useState('json');
+  const [placeId, setPlaceId] = useState('');
+  const [showCreditDetail, setShowCreditDetail] = useState(false);
   const [events, setEvents] = useState([]);
   const [showDev, setShowDev] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // all|open|acknowledged|resolved
@@ -85,14 +92,26 @@ function App() {
     }
   }, [regionId]);
 
+  const fetchSafetyCredit = useCallback(async () => {
+    try {
+      const params = { regionId };
+      if (placeId) params.placeId = placeId;
+      const res = await axios.get('/safety-credit', { params });
+      if (typeof res.data?.score === 'number') setCredit(res.data);
+    } catch (e) {
+      // ignore credit errors for UX
+    }
+  }, [regionId, placeId]);
+
   const refreshAll = useCallback(async () => {
     await Promise.allSettled([
       fetchFiltered(),
       fetchGeofences(),
       fetchSafetyScore(),
+      fetchSafetyCredit(),
       fetchIncidents(),
     ]);
-  }, [fetchFiltered, fetchGeofences, fetchSafetyScore, fetchIncidents]);
+  }, [fetchFiltered, fetchGeofences, fetchSafetyScore, fetchSafetyCredit, fetchIncidents]);
 
   const seedTestGeofence = async () => {
     try {
@@ -112,26 +131,6 @@ function App() {
           [lat - d, lng - d],
         ],
       };
-
-  // Compute filtered alerts for table rendering
-  const filteredAlerts = alerts.filter(a => {
-    if (statusFilter !== 'all') {
-      const s = a.status || (a.incidentId ? (incidentStatus[a.incidentId] || 'open') : 'open');
-      if (s !== statusFilter) return false;
-    }
-    if (searchText) {
-      const q = searchText.toLowerCase();
-      const parts = [
-        a.id,
-        a.incidentId,
-        a.riskLevel,
-        a.regionId,
-        (a.status || ''),
-      ].map(x => (x ? String(x).toLowerCase() : ''));
-      if (!parts.some(p => p.includes(q))) return false;
-    }
-    return true;
-  });
       await axios.post('/geofences', body);
       await fetchGeofences();
     } catch (e) {
@@ -139,6 +138,28 @@ function App() {
       alert('Failed to seed geofence: ' + (e.response?.data?.error || e.message));
     }
   };
+
+  // Compute filtered alerts for table rendering
+  const filteredAlerts = useMemo(() => {
+    return alerts.filter(a => {
+      if (statusFilter !== 'all') {
+        const s = a.status || (a.incidentId ? (incidentStatus[a.incidentId] || 'open') : 'open');
+        if (s !== statusFilter) return false;
+      }
+      if (searchText) {
+        const q = searchText.toLowerCase();
+        const parts = [
+          a.id,
+          a.incidentId,
+          a.riskLevel,
+          a.regionId,
+          (a.status || ''),
+        ].map(x => (x ? String(x).toLowerCase() : ''));
+        if (!parts.some(p => p.includes(q))) return false;
+      }
+      return true;
+    });
+  }, [alerts, statusFilter, searchText, incidentStatus]);
 
   useEffect(() => {
     // Load persisted prefs
@@ -214,8 +235,26 @@ function App() {
   // When filters change, refetch score and filtered incidents
   useEffect(() => {
     fetchSafetyScore();
+    fetchSafetyCredit();
     fetchFiltered();
-  }, [fetchSafetyScore, fetchFiltered]);
+  }, [fetchSafetyScore, fetchSafetyCredit, fetchFiltered]);
+
+  // Persist selected place per region
+  useEffect(() => {
+    try {
+      const key = `dash.place.${regionId || 'default'}`;
+      if (placeId) localStorage.setItem(key, placeId); else localStorage.removeItem(key);
+    } catch {}
+  }, [placeId, regionId]);
+
+  // Load stored place when region changes
+  useEffect(() => {
+    try {
+      const key = `dash.place.${regionId || 'default'}`;
+      const p = localStorage.getItem(key);
+      setPlaceId(p || '');
+    } catch { setPlaceId(''); }
+  }, [regionId]);
 
   // Persist prefs
   useEffect(() => {
@@ -245,6 +284,47 @@ function App() {
           <img src={logo} alt="logo" style={{ width:24, height:24 }} />
           <span>Smart Tourist Safety</span>
         </div>
+      {/* Safety Credit card with place selector */}
+      <div style={{ margin: '8px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label>
+          Place:
+          <select value={placeId} onChange={(e)=>setPlaceId(e.target.value)} style={{ marginLeft: 8 }}>
+            <option value="">(all in region)</option>
+            {Array.from(new Map(
+              geofences
+                .filter(g => !regionId || regionId === 'all' || g.regionId === regionId)
+                .filter(g => g?.meta?.placeId)
+                .map(g => [g.meta.placeId, g.name || g.meta.placeId])
+            ).entries()).map(([pid,label]) => (
+              <option key={pid} value={pid}>{label}</option>
+            ))}
+          </select>
+        </label>
+        {typeof credit?.score === 'number' && (
+          <div style={{ padding: 10, border: '1px solid #eee', borderRadius: 8, background: credit.score >= 700 ? '#eafaf1' : credit.score >= 400 ? '#fef9e7' : '#fdecea' }}>
+            <strong>Safety Credit ({placeId || regionId || 'default'})</strong>: {credit.score}/900
+            <button style={{ marginLeft: 8 }} onClick={()=>setShowCreditDetail(true)}>Breakdown</button>
+            <span
+              title={
+                'Heuristic v1: Base 900 minus penalties – incident density (weighted by severity & recency), unresolved ratio, soft alerts ratio, and night-time ratio.'
+              }
+              style={{ marginLeft: 8, cursor: 'help', border: '1px solid #ccc', borderRadius: 4, padding: '0 6px', fontSize: 12 }}
+            >?
+            </span>
+          </div>
+        )}
+      </div>
+      {showCreditDetail && credit && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={()=>setShowCreditDetail(false)}>
+          <div style={{ background:'#fff', minWidth:320, padding:16, borderRadius:8 }} onClick={(e)=>e.stopPropagation()}>
+            <h3>Safety Credit Breakdown</h3>
+            <pre style={{ fontSize:12, whiteSpace:'pre-wrap' }}>{JSON.stringify(credit, null, 2)}</pre>
+            <div style={{ textAlign:'right' }}>
+              <button onClick={()=>setShowCreditDetail(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDev && (
         <div className="map-card" style={{ marginTop: 12 }}>

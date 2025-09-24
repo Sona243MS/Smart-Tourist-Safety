@@ -10,7 +10,7 @@ if (useSqlite) {
   sqlite = require('./db/sqlite').init(process.env.SQLITE_DB_PATH || './data/tourist-safety.db');
 }
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Use CORS to allow requests from your frontend app
 app.use(cors());
@@ -129,7 +129,7 @@ app.get('/events', (req, res) => {
 });
 
 // Soft status alerts (e.g., low_battery, safe)
-app.post('/panic-alert', (req, res) => {
+app.post('/soft-alert', (req, res) => {
   try {
     const { latitude, longitude, touristId = null, deviceId = null, type } = req.body || {};
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
@@ -319,6 +319,8 @@ app.get('/incidents/export', (req, res) => {
 });
 
 const safetyScoreSvc = require('./services/safetyScore');
+const safetyCreditSvc = require('./services/safetyCredit');
+const jwtUtil = require('./utils/jwt');
 
 // Safety score endpoint (delegates to service)
 app.get('/safety-score', (req, res) => {
@@ -330,6 +332,59 @@ app.get('/safety-score', (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Failed to compute safety score' });
+  }
+});
+
+// Safety Credit Score (CIBIL-like) for a region/place
+app.get('/safety-credit', (req, res) => {
+  try {
+    const regionId = req.query.regionId || 'default';
+    const placeId = req.query.placeId || undefined;
+    const days = Number.parseInt(req.query.days || '30', 10);
+    const result = safetyCreditSvc.computeCredit(db, { regionId, placeId, days });
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Failed to compute safety credit' });
+  }
+});
+
+// DID issuance (JWT-based, blockchain-pluggable)
+app.post('/did/issue', (req, res) => {
+  try {
+    const { kycType, kycHash, itinerary, emergencyContacts, validDays = 14 } = req.body || {};
+    if (!kycType || !kycHash) return res.status(400).json({ ok: false, error: 'kycType and kycHash required' });
+    const didId = randomUUID();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expSec = nowSec + Math.max(1, Math.min(60, Number(validDays))) * 86400;
+    const payload = {
+      iss: 'smart-tourist-safety',
+      iat: nowSec,
+      exp: expSec,
+      didId,
+      kycType,
+      kycHash,
+      itinerary: itinerary || null,
+      emergencyContacts: emergencyContacts || null,
+    };
+    const token = jwtUtil.sign(payload);
+    res.json({ ok: true, didToken: token, didId, expiresAt: new Date(expSec * 1000).toISOString() });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Failed to issue DID token' });
+  }
+});
+
+app.post('/did/verify', (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ ok: false, error: 'token required' });
+    const claims = jwtUtil.verify(token);
+    if (!claims) return res.status(401).json({ ok: false, error: 'invalid or expired token' });
+    res.json({ ok: true, claims });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Failed to verify token' });
   }
 });
 
@@ -457,5 +512,5 @@ app.get('/panic-alerts/stream', (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Backend server listening at http://localhost:${port}`);
+  console.log(`Backend server listening on port ${port}`);
 });

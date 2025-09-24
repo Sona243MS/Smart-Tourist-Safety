@@ -489,9 +489,14 @@ app.get('/panic-alerts', (_req, res) => {
 
 // Server-Sent Events endpoint for live updates
 app.get('/panic-alerts/stream', (req, res) => {
+  // Explicit CORS for Firebase-hosted dashboards
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // Hint client to retry in case of disconnects
+  res.write('retry: 5000\n\n');
   res.flushHeaders && res.flushHeaders();
 
   // Send a snapshot first
@@ -503,7 +508,7 @@ app.get('/panic-alerts/stream', (req, res) => {
     if (!res.writableEnded) {
       res.write(': ping\n\n');
     }
-  }, 25000);
+  }, 30000);
 
   req.on('close', () => {
     clearInterval(hb);

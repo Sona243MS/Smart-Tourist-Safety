@@ -3,6 +3,21 @@ import axios from "axios";
 import { useGeolocated } from "react-geolocated";
 import logo from "./assets/logo.svg";
 import QRCode from "react-qr-code";
+// Configure API base URL for production deployments (Firebase/Netlify, etc.)
+if (process.env.REACT_APP_API_BASE) {
+  axios.defaults.baseURL = process.env.REACT_APP_API_BASE;
+}
+// Attach DID token automatically if present
+axios.interceptors.request.use((config) => {
+  try {
+    const tok = localStorage.getItem('did.token');
+    if (tok) {
+      config.headers = config.headers || {};
+      config.headers['Authorization'] = `Bearer ${tok}`;
+    }
+  } catch {}
+  return config;
+});
 
 function App() {
   const [loading, setLoading] = useState(false);
@@ -21,6 +36,11 @@ function App() {
   const [mobileScore, setMobileScore] = useState(null);
   const [lang, setLang] = useState('en'); // 'en' | 'as'
   const [dark, setDark] = useState(false);
+  // DID state
+  const [didToken, setDidToken] = useState("");
+  const [kycType, setKycType] = useState('passport');
+  const [kycNumber, setKycNumber] = useState('');
+  const [tripDays, setTripDays] = useState(14);
 
   // Geolocation hook
   const { coords, isGeolocationAvailable, isGeolocationEnabled } =
@@ -38,6 +58,61 @@ function App() {
       setBackendStatus("online");
     } catch (e) {
       setBackendStatus("offline");
+    }
+  };
+
+  const verifyDid = async () => {
+    try {
+      if (!didToken) { setMessage('⚠️ No active token'); return; }
+      setLoading(true);
+      const res = await axios.post('/did/verify', { token: didToken });
+      if (res.data?.ok) {
+        setMessage(`✅ Valid. Expires: ${new Date((res.data.claims.exp||0)*1000).toLocaleString()}`);
+      } else {
+        setMessage('❌ Invalid or expired ID');
+      }
+    } catch (e) {
+      setMessage('❌ Failed to verify ID');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage(''), 2500);
+    }
+  };
+
+  const clearDid = () => {
+    try { localStorage.removeItem('did.token'); } catch {}
+    setDidToken('');
+    setMessage('ℹ️ Digital ID cleared');
+    setTimeout(() => setMessage(''), 2000);
+  };
+
+  // Utility: hash using Web Crypto
+  async function sha256Hex(str) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
+    const arr = Array.from(new Uint8Array(buf));
+    return arr.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  const issueDid = async () => {
+    try {
+      if (!kycNumber) { setMessage('⚠️ Enter KYC number'); return; }
+      setLoading(true);
+      const hash = await sha256Hex(`${kycType}:${kycNumber}`);
+      const body = { kycType, kycHash: hash, validDays: Number(tripDays) || 14 };
+      const res = await axios.post('/did/issue', body);
+      if (res.data?.didToken) {
+        localStorage.setItem('did.token', res.data.didToken);
+        setDidToken(res.data.didToken);
+        setMessage(`✅ Digital ID issued. Expires: ${res.data.expiresAt}`);
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('❌ Failed to issue Digital ID');
+      }
+    } catch (e) {
+      setMessage('❌ Failed to issue Digital ID');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -95,8 +170,10 @@ function App() {
   useEffect(() => {
     const t = localStorage.getItem("touristId");
     const d = localStorage.getItem("deviceId");
+    const token = localStorage.getItem('did.token');
     if (t) setTouristId(t);
     if (d) setDeviceId(d);
+    if (token) setDidToken(token);
     // Load mobile UI prefs
     try {
       const pDark = localStorage.getItem('mobile.dark');
@@ -222,7 +299,76 @@ function App() {
       copied: 'লিংক কপি হ’ল!',
       language: 'ভাষা',
     };
-    return lang === 'as' ? as : en;
+    // Additional North-Eastern languages (basic labels; fallback to EN)
+    const bn = {
+      appTitle: 'স্মার্ট ট্যুরিস্ট সেফটি',
+      subtitle: 'জরুরি SOS ও লাইভ সেফটি স্ট্যাটাস',
+      safetyScore: 'সেফটি স্কোর',
+      currentZoneRisk: 'বর্তমান এলাকার ঝুঁকি',
+      outsideZone: 'কোনো ঝুঁকিপূর্ণ এলাকার বাইরে',
+      gps: 'জিপিএস',
+      backend: 'ব্যাকএন্ড',
+      queuedAlerts: 'কিউড অ্যালার্ট',
+      myId: 'আমার আইডি',
+      showToResponders: 'রেসপন্ডারদের দেখান দ্রুত সনাক্তকরণের জন্য।',
+      touristId: 'ট্যুরিস্ট আইডি',
+      deviceId: 'ডিভাইস আইডি',
+      setup: 'সেটআপ',
+      registerTourist: 'ট্যুরিস্ট রেজিস্টার',
+      phone: 'ফোন',
+      pairDevice: 'ডিভাইস পেয়ার',
+      bleOptional: 'BLE ঠিকানা (ঐচ্ছিক)',
+      panic: 'জরুরি SOS',
+      tapToSend: 'নিচের বাটনে চাপ দিয়ে আপনার অবস্থানসহ SOS পাঠান।',
+      send: 'SOS পাঠান',
+      lastSent: 'সর্বশেষ',
+      contacts: 'জরুরি যোগাযোগ',
+      police: 'পুলিশ',
+      ambulance: 'অ্যাম্বুলেন্স',
+      disaster: 'দুর্যোগ সেবা',
+      shareLoc: 'লোকেশন শেয়ার',
+      copyLink: 'লিংক কপি',
+      copied: 'লিংক কপি হয়েছে!',
+      language: 'ভাষা',
+    };
+    const brx = {
+      appTitle: 'स्मार्ट टुरिस्ट सेफ्टी',
+      subtitle: 'दावग्रो SOS आरो लाइव सेफ्टी स्टेटस',
+      safetyScore: 'सेफ्टी स्कोर',
+      currentZoneRisk: 'दानि ज'ननि जोखि',
+      outsideZone: 'ज'ननि बाहाय',
+      gps: 'GPS',
+      backend: 'बेकएण्ड',
+      queuedAlerts: 'क्यू अलार्म',
+      myId: 'आंनि ID',
+      showToResponders: 'सजललाई थाखायनाय जों सिगांलां जाबाय।',
+      touristId: 'टुरिस्ट ID',
+      deviceId: 'डिभाइस ID',
+      setup: 'सेटअप',
+      registerTourist: 'टुरिस्ट रेजिष्टर',
+      phone: 'फोन',
+      pairDevice: 'डिभाइस पेर',
+      bleOptional: 'BLE थं (आवस्यक नङा)',
+      panic: 'जोरजोरनि SOS',
+      tapToSend: 'बुं दाब हो लाबाय',
+      send: 'SOS लाबाय',
+      lastSent: 'ज'खाथि लाबाय',
+      contacts: 'जोरजोरनि फोन',
+      police: 'Police',
+      ambulance: 'Ambulance',
+      disaster: 'Disaster',
+      shareLoc: 'Location शेयर',
+      copyLink: 'लिंक कपी',
+      copied: 'लिंक कपीखालाम! ',
+      language: 'Language',
+    };
+    const mni = { ...en, appTitle: 'স্মার্ট পর্যটক সুরক্ষা (মণিপুরী)', subtitle: en.subtitle };
+    const kha = { ...en, appTitle: 'Smart Tourist Safety (Khasi)', subtitle: en.subtitle };
+    const grt = { ...en, appTitle: 'Smart Tourist Safety (Garo)', subtitle: en.subtitle };
+    const lus = { ...en, appTitle: 'Smart Tourist Safety (Mizo)', subtitle: en.subtitle };
+
+    const dict = { en, as, bn, brx, mni, kha, grt, lus };
+    return dict[lang] || en;
   }, [lang]);
 
   const mapShareUrl = useMemo(() => {
@@ -374,7 +520,13 @@ function App() {
             <label className="text-xs text-gray-600 mr-2">{t.language}:</label>
             <select value={lang} onChange={(e)=>setLang(e.target.value)} className="text-xs border rounded px-2 py-1">
               <option value="en">English</option>
-              <option value="as">অসমীয়া</option>
+              <option value="as">অসমীয়া (Assamese)</option>
+              <option value="bn">বাংলা (Bengali)</option>
+              <option value="brx">Bodo</option>
+              <option value="mni">Manipuri</option>
+              <option value="kha">Khasi</option>
+              <option value="grt">Garo</option>
+              <option value="lus">Mizo</option>
             </select>
           </div>
         </div>
@@ -419,6 +571,34 @@ function App() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 dark:border-gray-700 shadow-lg rounded-2xl p-6 md:p-8 border border-transparent">
+          {/* Digital ID (DID) */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">Digital ID</h3>
+            {didToken ? (
+              <div className="text-sm text-green-700 dark:text-green-400 mb-2">Active token present.</div>
+            ) : (
+              <div className="text-sm text-yellow-700 mb-2">No active token. Issue one for secured alerts.</div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+              <label className="text-sm">Doc Type
+                <select value={kycType} onChange={e=>setKycType(e.target.value)} className="w-full border rounded p-2">
+                  <option value="passport">Passport</option>
+                  <option value="aadhaar">Aadhaar</option>
+                </select>
+              </label>
+              <label className="text-sm">Doc Number
+                <input value={kycNumber} onChange={e=>setKycNumber(e.target.value)} placeholder="Enter number" className="w-full border rounded p-2" />
+              </label>
+              <label className="text-sm">Trip Days
+                <input type="number" min={1} max={60} value={tripDays} onChange={e=>setTripDays(e.target.value)} className="w-full border rounded p-2" />
+              </label>
+              <button onClick={issueDid} disabled={loading || !kycNumber} className={`w-full py-2 rounded text-white font-semibold ${loading?"bg-gray-400":"bg-emerald-600 hover:bg-emerald-700"}`}>Issue ID</button>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button onClick={verifyDid} disabled={loading || !didToken} className={`px-3 py-2 rounded border ${didToken?"border-blue-600 text-blue-700 hover:bg-blue-50":"border-gray-300 text-gray-400"}`}>Verify ID</button>
+              <button onClick={clearDid} className="px-3 py-2 rounded border border-red-600 text-red-700 hover:bg-red-50">Clear ID</button>
+            </div>
+          </div>
           {/* My ID card */}
           <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
             <div className="md:col-span-2">

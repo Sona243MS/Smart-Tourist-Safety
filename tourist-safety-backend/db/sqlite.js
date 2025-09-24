@@ -60,7 +60,7 @@ function createIncident(db, row) {
 
 function updateIncidentStatus(db, id, status) {
   const now = new Date().toISOString();
-  db.prepare('UPDATE incidents SET status=@status, resolvedAt=CASE WHEN @status = "resolved" THEN @now ELSE resolvedAt END WHERE id=@id')
+  db.prepare("UPDATE incidents SET status=@status, resolvedAt=CASE WHEN @status = 'resolved' THEN @now ELSE resolvedAt END WHERE id=@id")
     .run({ id, status, now });
 }
 

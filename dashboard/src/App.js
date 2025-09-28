@@ -1,8 +1,32 @@
 import './App.css';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import logo from './assets/logo.svg';
 import axios from 'axios';
 import MapView from './MapView';
+// MUI
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import AppBar from '@mui/material/AppBar';
+import Toolbar from '@mui/material/Toolbar';
+import Typography from '@mui/material/Typography';
+import Drawer from '@mui/material/Drawer';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import IconButton from '@mui/material/IconButton';
+import Switch from '@mui/material/Switch';
+import Button from '@mui/material/Button';
+import Skeleton from '@mui/material/Skeleton';
+// Icons
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import InsightsIcon from '@mui/icons-material/Insights';
+import MenuIcon from '@mui/icons-material/Menu';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
 // Configure API base URL for production deployments (Netlify/Vercel, etc.)
 if (process.env.REACT_APP_API_BASE) {
   axios.defaults.baseURL = process.env.REACT_APP_API_BASE;
@@ -29,11 +53,26 @@ function App() {
   const [showDev, setShowDev] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // all|open|acknowledged|resolved
   const [searchText, setSearchText] = useState('');
+  const [anchors, setAnchors] = useState([]);
+  const [gpsPings, setGpsPings] = useState([]);
+  const [gpsHistory, setGpsHistory] = useState({});
+  const [showLiveGps, setShowLiveGps] = useState(true);
+  const [fitGps, setFitGps] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'anchors' | 'analytics'
+  const [drawerOpen, setDrawerOpen] = useState(true);
+
+  // MUI theme bound to existing dark state
+  const theme = useMemo(() => createTheme({
+    palette: { mode: dark ? 'dark' : 'light' },
+    shape: { borderRadius: 10 },
+  }), [dark]);
+
 
   // Fetch incidents filtered by region/time and project to alerts used in table+map
-  const fetchFiltered = useCallback(async () => {
+  const fetchFiltered = useCallback(async (opts = {}) => {
+    const { silent = false } = opts;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError('');
       const params = {};
       if (regionId && regionId !== 'all') params.regionId = regionId;
@@ -57,7 +96,7 @@ function App() {
     } catch (e) {
       setError(e.response?.data?.error || e.message || 'Failed to load incidents');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [regionId, windowMinutes]);
 
@@ -110,6 +149,9 @@ function App() {
       fetchSafetyScore(),
       fetchSafetyCredit(),
       fetchIncidents(),
+      (async()=>{ try { const r = await axios.get('/did/anchors'); if (r.data?.ok && Array.isArray(r.data.anchors)) setAnchors(r.data.anchors); } catch(_){} })(),
+      (async()=>{ try { const r = await axios.get('/gps/last'); if (r.data?.ok && Array.isArray(r.data.pings)) setGpsPings(r.data.pings); } catch(_){} })(),
+      (async()=>{ try { const r = await axios.get('/gps/history'); if (r.data?.ok && r.data.history) setGpsHistory(r.data.history); } catch(_){} })(),
     ]);
   }, [fetchFiltered, fetchGeofences, fetchSafetyScore, fetchSafetyCredit, fetchIncidents]);
 
@@ -190,7 +232,9 @@ function App() {
     // Start with initial fetches in case SSE is blocked
     refreshAll();
     setLiveStatus('connecting');
-    const es = new EventSource('/panic-alerts/stream');
+    const base = axios.defaults.baseURL || '';
+    const sseUrl = base ? `${base.replace(/\/$/, '')}/panic-alerts/stream` : '/panic-alerts/stream';
+    const es = new EventSource(sseUrl);
 
     es.onopen = () => {
       setLiveStatus('connected');
@@ -200,11 +244,17 @@ function App() {
       try {
         const data = JSON.parse(evt.data);
         if (data.type === 'alert' || data.type === 'incident_update' || data.type === 'snapshot') {
-          // Always refetch filtered data so table+map stay aligned with filters
-          fetchFiltered();
+          // Background refresh without toggling spinner
+          fetchFiltered({ silent: true });
           if (data.type === 'incident_update' && data.incident?.id && data.incident?.status) {
             setIncidentStatus((prev) => ({ ...prev, [data.incident.id]: data.incident.status }));
           }
+        } else if (data.type === 'gps' && data.ping) {
+          // Update last GPS pings list in-memory
+          setGpsPings((prev) => {
+            const next = [data.ping, ...prev.filter(p => (p.touristId||p.deviceId) !== (data.ping.touristId||data.ping.deviceId))];
+            return next.slice(0, 50);
+          });
         }
       } catch (e) {
         // ignore malformed message
@@ -218,11 +268,13 @@ function App() {
 
     // Polling fallback every 10s in case SSE disconnects
     const pollId = setInterval(() => {
-      if (liveStatus !== 'connected') {
-        fetchFiltered();
+      if (liveRef.current !== 'connected') {
+        fetchFiltered({ silent: true });
         fetchGeofences();
         fetchSafetyScore();
         fetchIncidents();
+        (async()=>{ try { const r = await axios.get('/gps/last'); if (r.data?.ok && Array.isArray(r.data.pings)) setGpsPings(r.data.pings); } catch(_){} })();
+        (async()=>{ try { const r = await axios.get('/gps/history'); if (r.data?.ok && r.data.history) setGpsHistory(r.data.history); } catch(_){} })();
       }
     }, 10000);
 
@@ -230,7 +282,11 @@ function App() {
       es.close();
       clearInterval(pollId);
     };
-  }, [refreshAll, fetchFiltered, fetchGeofences, fetchSafetyScore, fetchIncidents, liveStatus]);
+  }, [refreshAll, fetchFiltered, fetchGeofences, fetchSafetyScore, fetchIncidents]);
+
+  // Track live status in a ref for stable polling callbacks
+  const liveRef = useRef(liveStatus);
+  useEffect(() => { liveRef.current = liveStatus; }, [liveStatus]);
 
   // When filters change, refetch score and filtered incidents
   useEffect(() => {
@@ -277,13 +333,122 @@ function App() {
   };
 
   return (
-    <div className={`App ${dark ? 'dark' : ''}`} style={{ padding: 24 }}>
+    <div className={`App ${dark ? 'dark' : ''}`} style={{ padding: 0 }}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        {/* AppBar */}
+        <AppBar position="sticky" color="default" elevation={1}>
+          <Toolbar>
+            <IconButton edge="start" onClick={()=>setDrawerOpen(v=>!v)} sx={{ mr: 1 }}>
+              <MenuIcon />
+            </IconButton>
+            <img src={logo} alt="logo" style={{ width:24, height:24, marginRight: 8 }} />
+            <Typography variant="h6" sx={{ flexGrow: 1 }}>Smart Tourist Safety</Typography>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {dark ? <DarkModeIcon fontSize="small"/> : <LightModeIcon fontSize="small"/>}
+              <Switch checked={dark} onChange={(e)=>setDark(e.target.checked)} />
+              <span className={`badge ${liveStatus}`} style={{ marginLeft: 8 }}>{liveStatus}</span>
+            </div>
+          </Toolbar>
+        </AppBar>
+
+        {/* Drawer */}
+        <Drawer variant="permanent" open={drawerOpen} PaperProps={{ sx: { width: 200 } }}>
+          <Toolbar />
+          <List>
+            <ListItemButton selected={activeTab==='dashboard'} onClick={()=>setActiveTab('dashboard')}>
+              <ListItemIcon><DashboardIcon /></ListItemIcon>
+              <ListItemText primary="Dashboard" />
+            </ListItemButton>
+            <ListItemButton selected={activeTab==='anchors'} onClick={()=>setActiveTab('anchors')}>
+              <ListItemIcon><VerifiedUserIcon /></ListItemIcon>
+              <ListItemText primary="Anchors" />
+            </ListItemButton>
+            <ListItemButton selected={activeTab==='analytics'} onClick={()=>setActiveTab('analytics')}>
+              <ListItemIcon><InsightsIcon /></ListItemIcon>
+              <ListItemText primary="Analytics" />
+            </ListItemButton>
+          </List>
+        </Drawer>
+
+        <div style={{ marginLeft: 200, padding: 24 }}>
       {/* Header / Toolbar */}
       <div className="topbar">
         <div className="brand" style={{ display:'flex', alignItems:'center', gap:8 }}>
           <img src={logo} alt="logo" style={{ width:24, height:24 }} />
           <span>Smart Tourist Safety</span>
         </div>
+      {/* Anchors & GPS panels */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+        <div className="map-card">
+          <div className="map-card-header">
+            <div>DID Anchors</div>
+            <div>
+              <button onClick={async()=>{ try { const r = await axios.get('/did/anchors'); if (r.data?.ok) setAnchors(r.data.anchors||[]); } catch{} }}>Refresh</button>
+            </div>
+          </div>
+          {anchors.length === 0 ? (
+            <div style={{ padding: 12, color: '#6b7280' }}>No anchors yet.</div>
+          ) : (
+            <table className="alerts-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Time</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>DID</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Digest</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Chain</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {anchors.slice(0,20).map(a => (
+                  <tr key={a.id}>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{new Date(a.createdAt).toLocaleString()}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8, fontFamily:'monospace' }}>{a.didId}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8, fontFamily:'monospace' }}>{(a.digest||'').slice(0,16)}…</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{a.chain||'-'}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{a.status||'-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="map-card">
+          <div className="map-card-header">
+            <div>GPS Pings (latest)</div>
+            <div>
+              <button onClick={async()=>{ try { const r = await axios.get('/gps/last'); if (r.data?.ok) setGpsPings(r.data.pings||[]); } catch{} }}>Refresh</button>
+            </div>
+          </div>
+          {gpsPings.length === 0 ? (
+            <div style={{ padding: 12, color: '#6b7280' }}>No GPS pings yet.</div>
+          ) : (
+            <table className="alerts-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Time</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Lat</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Lng</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Tourist</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Device</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gpsPings.slice(0,20).map(p => (
+                  <tr key={(p.touristId||p.deviceId||'')+p.at}>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{new Date(p.at).toLocaleString()}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{p.latitude?.toFixed(5)}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8 }}>{p.longitude?.toFixed(5)}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8, fontFamily:'monospace' }}>{p.touristId||'-'}</td>
+                    <td style={{ borderBottom: '1px solid #eee', padding: 8, fontFamily:'monospace' }}>{p.deviceId||'-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
       {/* Safety Credit card with place selector */}
       <div style={{ margin: '8px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label>
@@ -400,14 +565,22 @@ function App() {
             }} />
             <span>Dev</span>
           </label>
+          <label className="toggle" style={{ marginLeft: 8 }}>
+            <input type="checkbox" checked={showLiveGps} onChange={(e)=>setShowLiveGps(e.target.checked)} />
+            <span>Show live GPS</span>
+          </label>
+          <label className="toggle" style={{ marginLeft: 8 }}>
+            <input type="checkbox" checked={fitGps} onChange={(e)=>setFitGps(e.target.checked)} />
+            <span>Fit GPS</span>
+          </label>
         </div>
       </div>
-      <h1 style={{ marginTop: 12 }}>Panic Alerts Dashboard</h1>
+      {activeTab==='dashboard' && <h1 style={{ marginTop: 12 }}>Panic Alerts Dashboard</h1>}
       <p>
         Live updates: <strong style={{ color: liveStatus === 'connected' ? 'var(--brand-green)' : liveStatus === 'connecting' ? 'var(--brand-yellow)' : 'var(--brand-red)' }}>{liveStatus}</strong>
         {liveStatus !== 'connected' && ' (fallback to polling)'}
       </p>
-      {typeof score === 'number' && (
+      {activeTab==='dashboard' && typeof score === 'number' && (
         <div className="safety-banner" style={{
           margin: '8px 0 16px',
           padding: '12px',
@@ -419,6 +592,7 @@ function App() {
           <strong>Safety Score ({regionId}):</strong> {score}/900
         </div>
       )}
+      {activeTab==='dashboard' && (
       <div className="controls" style={{ margin: '12px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label>
           Region:
@@ -435,28 +609,34 @@ function App() {
             <option value={1440}>Last 24h</option>
           </select>
         </label>
-        <button onClick={refreshAll} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh Now'}</button>
-        <button onClick={seedTestGeofence}>
-          Seed Test Geofence
-        </button>
-        <button onClick={() => {
+        <Button startIcon={<RefreshIcon/>} onClick={refreshAll} disabled={loading} variant="contained">{loading ? 'Refreshing…' : 'Refresh'}</Button>
+        <Button onClick={seedTestGeofence} variant="outlined">Seed Test Geofence</Button>
+        <Button startIcon={<DownloadIcon/>} variant="outlined" onClick={() => {
           const params = new URLSearchParams();
           if (regionId && regionId !== 'all') params.set('regionId', regionId);
           if (windowMinutes && Number(windowMinutes) > 0) params.set('minutes', String(windowMinutes));
           const url = `/incidents/export?${params.toString()}`;
           window.open(url, '_blank');
-        }}>Export CSV</button>
+        }}>Export CSV</Button>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={testMode} onChange={(e)=>setTestMode(e.target.checked)} />
           Test Alert Mode (click map)
         </label>
       </div>
-      {error && (
+      )}
+      {activeTab==='dashboard' && error && (
         <div style={{ color: 'white', background: '#c0392b', padding: 12, borderRadius: 6, marginBottom: 12 }}>
           {error}
         </div>
       )}
-      {filteredAlerts.length === 0 ? (
+      {activeTab==='dashboard' && (loading ? (
+        <div className="map-card" style={{ padding: 16 }}>
+          <Skeleton height={28} width={220} />
+          <Skeleton height={22} width={'100%'} />
+          <Skeleton height={22} width={'100%'} />
+          <Skeleton height={22} width={'100%'} />
+        </div>
+      ) : filteredAlerts.length === 0 ? (
         <div>No alerts yet.</div>
       ) : (
         <table className="alerts-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -517,9 +697,10 @@ function App() {
             ))}
           </tbody>
         </table>
-      )}
+      ))}
 
       {/* Map visualization card with legend */}
+      {activeTab==='dashboard' && (
       <div className="map-card">
         <div className="map-card-header">
           <div>Map</div>
@@ -533,6 +714,10 @@ function App() {
           alerts={alerts}
           geofences={geofences}
           testMode={testMode}
+          showLiveGps={showLiveGps}
+          gpsPings={gpsPings}
+          gpsHistory={gpsHistory}
+          fitGps={fitGps}
           onMapClick={async ([lat,lng]) => {
             if (!testMode) return;
             try {
@@ -541,6 +726,22 @@ function App() {
           }}
         />
       </div>
+      )}
+
+      {activeTab==='analytics' && (
+        <div className="map-card" style={{ padding: 16 }}>
+          <div className="map-card-header">Analytics (coming soon)</div>
+          <div style={{ padding: 16 }}>
+            <Skeleton height={30} width={260} />
+            <Skeleton height={140} variant="rectangular" sx={{ mt: 1, borderRadius: 2 }} />
+            <Skeleton height={18} width={'70%'} sx={{ mt: 2 }} />
+            <Skeleton height={18} width={'40%'} />
+          </div>
+        </div>
+      )}
+
+      </div>{/* content wrapper */}
+      </ThemeProvider>
     </div>
   );
 }

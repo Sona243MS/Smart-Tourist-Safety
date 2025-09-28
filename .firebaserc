@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "smart-tourist-safety-7aa08"
+  },
+  "targets": {
+    "smart-tourist-safety-7aa08": {
+      "hosting": {
+        "dashboard": [
+          "smart-tourist-safety-7aa08-dash"
+        ],
+        "mobile": [
+          "smart-tourist-safety-7aa08-mobile"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

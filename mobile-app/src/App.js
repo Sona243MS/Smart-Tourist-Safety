@@ -3,6 +3,54 @@ import axios from "axios";
 import { useGeolocated } from "react-geolocated";
 import logo from "./assets/logo.svg";
 import QRCode from "react-qr-code";
+import {
+  ThemeProvider,
+  createTheme,
+  CssBaseline,
+  AppBar,
+  Toolbar,
+  Typography,
+  IconButton,
+  Drawer,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
+  Tooltip,
+  useMediaQuery,
+  Fab,
+  Badge,
+  Switch,
+  FormControlLabel
+} from "@mui/material";
+import {
+  Menu as MenuIcon,
+  Dashboard as DashboardIcon,
+  Security as SecurityIcon,
+  LocationOn as LocationIcon,
+  Phone as PhoneIcon,
+  Settings as SettingsIcon,
+  Notifications as NotificationsIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  BatteryAlert as BatteryAlertIcon,
+  Share as ShareIcon,
+  QrCode as QrCodeIcon,
+  Person as PersonIcon,
+  DeviceHub as DeviceIcon,
+  Language as LanguageIcon,
+  DarkMode as DarkModeIcon,
+  LightMode as LightModeIcon
+} from "@mui/icons-material";
 // Configure API base URL for production deployments (Firebase/Netlify, etc.)
 if (process.env.REACT_APP_API_BASE) {
   axios.defaults.baseURL = process.env.REACT_APP_API_BASE;
@@ -26,6 +74,7 @@ function App() {
   const [deviceId, setDeviceId] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [aadhaar, setAadhaar] = useState("");
   const [bleAddress, setBleAddress] = useState("");
   const [backendStatus, setBackendStatus] = useState("checking"); // checking | online | offline
   const [lastSentAt, setLastSentAt] = useState(null);
@@ -36,11 +85,44 @@ function App() {
   const [mobileScore, setMobileScore] = useState(null);
   const [lang, setLang] = useState('en'); // 'en' | 'as'
   const [dark, setDark] = useState(false);
+  const [track, setTrack] = useState(false);
+  const [lastGpsAt, setLastGpsAt] = useState(null);
   // DID state
   const [didToken, setDidToken] = useState("");
   const [kycType, setKycType] = useState('passport');
   const [kycNumber, setKycNumber] = useState('');
   const [tripDays, setTripDays] = useState(14);
+  const [itinerary, setItinerary] = useState('');
+  const [emergencyContacts, setEmergencyContacts] = useState('');
+  // UI state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [alerts, setAlerts] = useState([]);
+  
+  // Responsive breakpoint
+  const isMobile = useMediaQuery('(max-width:600px)');
+  
+  // MUI Theme
+  const theme = createTheme({
+    palette: {
+      mode: dark ? 'dark' : 'light',
+      primary: {
+        main: '#dc2626', // red-600
+      },
+      secondary: {
+        main: '#1f2937', // gray-800
+      },
+    },
+    components: {
+      MuiDrawer: {
+        styleOverrides: {
+          paper: {
+            width: isMobile ? '100%' : 280,
+          },
+        },
+      },
+    },
+  });
 
   // Geolocation hook
   const { coords, isGeolocationAvailable, isGeolocationEnabled } =
@@ -58,6 +140,21 @@ function App() {
       setBackendStatus("online");
     } catch (e) {
       setBackendStatus("offline");
+    }
+  };
+
+  const sendGpsPing = async () => {
+    if (!coords) return;
+    try {
+      await axios.post('/gps/update', {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        touristId: touristId || null,
+        deviceId: deviceId || null,
+      });
+      setLastGpsAt(new Date().toISOString());
+    } catch (e) {
+      // ignore
     }
   };
 
@@ -99,7 +196,8 @@ function App() {
       if (!kycNumber) { setMessage('⚠️ Enter KYC number'); return; }
       setLoading(true);
       const hash = await sha256Hex(`${kycType}:${kycNumber}`);
-      const body = { kycType, kycHash: hash, validDays: Number(tripDays) || 14 };
+      const contactsArr = (emergencyContacts||'').split(',').map(s=>s.trim()).filter(Boolean);
+      const body = { kycType, kycHash: hash, validDays: Number(tripDays) || 14, itinerary: itinerary || null, emergencyContacts: contactsArr.length ? contactsArr : null };
       const res = await axios.post('/did/issue', body);
       if (res.data?.didToken) {
         localStorage.setItem('did.token', res.data.didToken);
@@ -166,6 +264,35 @@ function App() {
     } catch (_) {}
   };
 
+  const fetchAlerts = async () => {
+    try {
+      const res = await axios.get('/panic-alerts');
+      if (res.data?.ok && Array.isArray(res.data.alerts)) {
+        setAlerts(res.data.alerts);
+      }
+    } catch (_) {
+      // Mock data for demonstration
+      setAlerts([
+        {
+          id: 1,
+          type: 'panic',
+          timestamp: new Date().toISOString(),
+          status: 'sent',
+          location: coords ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}` : 'Unknown',
+          touristId: touristId || 'N/A'
+        },
+        {
+          id: 2,
+          type: 'safe',
+          timestamp: new Date(Date.now() - 300000).toISOString(),
+          status: 'sent',
+          location: coords ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}` : 'Unknown',
+          touristId: touristId || 'N/A'
+        }
+      ]);
+    }
+  };
+
   // Load persisted IDs and start retry loop for queued alerts
   useEffect(() => {
     const t = localStorage.getItem("touristId");
@@ -186,6 +313,7 @@ function App() {
     checkBackend();
     fetchGeofences();
     fetchRegions();
+    fetchAlerts();
     return () => { clearInterval(interval); clearInterval(ping); };
   }, []);
 
@@ -196,6 +324,16 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem('mobile.lang', lang || 'en'); } catch {}
   }, [lang]);
+  // Track GPS pings every 30s when enabled
+  useEffect(() => {
+    if (!track) return;
+    const intv = setInterval(() => {
+      sendGpsPing();
+    }, 30000);
+    // send immediately once when toggled on
+    sendGpsPing();
+    return () => clearInterval(intv);
+  }, [track, coords, touristId, deviceId]);
 
   // Simple point-in-polygon
   function pointInPolygon(point, polygon) {
@@ -267,6 +405,8 @@ function App() {
       copyLink: 'Copy link',
       copied: 'Link copied!',
       language: 'Language',
+      aadhaar: 'Aadhaar (12 digits, required)',
+      aadhaarRequiredMsg: 'Aadhaar is required and must be 12 digits',
     };
     const as = {
       appTitle: 'স্মাৰ্ট পৰ্যটক সুৰক্ষা',
@@ -298,6 +438,8 @@ function App() {
       copyLink: 'লিংক কপি',
       copied: 'লিংক কপি হ’ল!',
       language: 'ভাষা',
+      aadhaar: 'আধাৰ (১২ সংখ্যা, আবশ্যক)',
+      aadhaarRequiredMsg: 'আধাৰ ১২ সংখ্যাৰ হব লাগিব',
     };
     // Additional North-Eastern languages (basic labels; fallback to EN)
     const bn = {
@@ -330,6 +472,8 @@ function App() {
       copyLink: 'লিংক কপি',
       copied: 'লিংক কপি হয়েছে!',
       language: 'ভাষা',
+      aadhaar: 'আধার (১২ সংখ্যা, আবশ্যক)',
+      aadhaarRequiredMsg: 'আধার ১২ সংখ্যার হতে হবে',
     };
     const brx = {
       appTitle: 'स्मार्ट टुरिस्ट सेफ्टी',
@@ -399,11 +543,19 @@ function App() {
   const registerTourist = async () => {
     try {
       setLoading(true);
-      const res = await axios.post("/tourists/register", { name, phone });
+      // Aadhaar required: must be 12 digits
+      const aadhaarTrim = (aadhaar || '').replace(/\s+/g, '');
+      if (!/^\d{12}$/.test(aadhaarTrim)) {
+        setMessage(`⚠️ ${t.aadhaarRequiredMsg || 'Aadhaar is required and must be 12 digits'}`);
+        setTimeout(()=>setMessage(''), 2500);
+        return;
+      }
+      const res = await axios.post("/tourists/register", { name, phone, aadhaar: aadhaarTrim || undefined });
       if (res.data?.ok && res.data.touristId) {
         setTouristId(res.data.touristId);
         localStorage.setItem("touristId", res.data.touristId);
-        setMessage("✅ Tourist registered");
+        const last4 = aadhaarTrim ? aadhaarTrim.slice(-4) : '';
+        setMessage(`✅ Tourist registered${last4 ? ' (Aadhaar ****' + last4 + ')' : ''}`);
       } else {
         setMessage("❌ Failed to register tourist");
       }
@@ -489,225 +641,455 @@ function App() {
 
   if (!isGeolocationAvailable) {
     return (
-      <div className="flex items-center justify-center h-screen text-red-600 text-xl font-semibold">
-        Your browser does not support Geolocation.
-      </div>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box display="flex" alignItems="center" justifyContent="center" height="100vh" color="error.main">
+          <Typography variant="h5" fontWeight="bold">
+            Your browser does not support Geolocation.
+          </Typography>
+        </Box>
+      </ThemeProvider>
     );
   }
 
   if (!isGeolocationEnabled) {
     return (
-      <div className="flex items-center justify-center h-screen text-red-600 text-xl font-semibold">
-        Geolocation is not enabled. Please enable location access.
-      </div>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box display="flex" alignItems="center" justifyContent="center" height="100vh" color="error.main">
+          <Typography variant="h5" fontWeight="bold">
+            Geolocation is not enabled. Please enable location access.
+          </Typography>
+        </Box>
+      </ThemeProvider>
     );
   }
 
+  const drawerItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
+    { id: 'alerts', label: 'Alerts', icon: <NotificationsIcon /> },
+    { id: 'security', label: 'Security', icon: <SecurityIcon /> },
+    { id: 'location', label: 'Location', icon: <LocationIcon /> },
+    { id: 'contacts', label: 'Contacts', icon: <PhoneIcon /> },
+    { id: 'settings', label: 'Settings', icon: <SettingsIcon /> },
+  ];
+
+  const renderAlertsTable = () => (
+    <TableContainer component={Paper} sx={{ mt: 2 }}>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Type</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Location</TableCell>
+            <TableCell>Timestamp</TableCell>
+            <TableCell>Tourist ID</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {alerts.map((alert) => (
+            <TableRow key={alert.id}>
+              <TableCell>
+                <Chip
+                  icon={alert.type === 'panic' ? <WarningIcon /> : <CheckCircleIcon />}
+                  label={alert.type}
+                  color={alert.type === 'panic' ? 'error' : 'success'}
+                  size="small"
+                />
+              </TableCell>
+              <TableCell>
+                <Chip
+                  label={alert.status}
+                  color={alert.status === 'sent' ? 'success' : 'warning'}
+                  size="small"
+                />
+              </TableCell>
+              <TableCell>{alert.location}</TableCell>
+              <TableCell>{new Date(alert.timestamp).toLocaleString()}</TableCell>
+              <TableCell>{alert.touristId}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
   return (
-    <div className={dark ? 'dark' : ''}>
-      <div className="min-h-screen bg-gradient-to-b from-red-50 via-white to-red-100 dark:from-gray-900 dark:via-gray-900 dark:to-black dark:text-gray-100">
-      {/* Header with logo */}
-      <header className="sticky top-0 z-10 bg-white/80 dark:bg-gray-900/70 backdrop-blur border-b border-red-100 dark:border-gray-800">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-          <img src={logo} alt="Smart Tourist Safety" className="w-9 h-9" />
-          <div>
-            <h1 className="text-lg font-bold text-red-700 dark:text-red-400 leading-5">{t.appTitle}</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{t.subtitle}</p>
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <label className="text-xs text-gray-600 dark:text-gray-300 mr-1">Dark</label>
-            <input type="checkbox" checked={dark} onChange={(e)=>setDark(e.target.checked)} />
-            <label className="text-xs text-gray-600 mr-2">{t.language}:</label>
-            <select value={lang} onChange={(e)=>setLang(e.target.value)} className="text-xs border rounded px-2 py-1">
-              <option value="en">English</option>
-              <option value="as">অসমীয়া (Assamese)</option>
-              <option value="bn">বাংলা (Bengali)</option>
-              <option value="brx">Bodo</option>
-              <option value="mni">Manipuri</option>
-              <option value="kha">Khasi</option>
-              <option value="grt">Garo</option>
-              <option value="lus">Mizo</option>
-            </select>
-          </div>
-        </div>
-      </header>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+        {/* App Bar */}
+        <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+          <Toolbar>
+            <IconButton
+              color="inherit"
+              edge="start"
+              onClick={() => setDrawerOpen(!drawerOpen)}
+              sx={{ mr: 2 }}
+            >
+              <MenuIcon />
+            </IconButton>
+            <img src={logo} alt="Smart Tourist Safety" style={{ width: 32, height: 32, marginRight: 16 }} />
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              {t.appTitle}
+            </Typography>
+            
+            {/* Dashboard Toolbar with Icons and Tooltips */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Tooltip title="Toggle Dark Mode">
+                <IconButton color="inherit" onClick={() => setDark(!dark)}>
+                  {dark ? <LightModeIcon /> : <DarkModeIcon />}
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Language Settings">
+                <IconButton color="inherit">
+                  <LanguageIcon />
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Notifications">
+                <IconButton color="inherit">
+                  <Badge badgeContent={alerts.length} color="error">
+                    <NotificationsIcon />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Share Location">
+                <IconButton color="inherit" onClick={copyShareLink}>
+                  <ShareIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Toolbar>
+        </AppBar>
 
-      <main className="max-w-3xl mx-auto px-4 py-6">
-        {/* Safety banner */}
-        {typeof mobileScore === 'number' && (
-          <div className="mb-4 p-3 rounded-xl border" style={{
-            background: mobileScore >= 700 ? '#eafaf1' : mobileScore >= 400 ? '#fef9e7' : '#fdecea',
-            borderColor: mobileScore >= 700 ? '#2ecc71' : mobileScore >= 400 ? '#f1c40f' : '#e74c3c'
-          }}>
-            <div className="text-sm text-gray-700"><strong>{t.safetyScore} ({currentRegion}):</strong> {mobileScore}/900</div>
-            <div className="text-xs text-gray-500">{currentRisk ? `${t.currentZoneRisk}: ${currentRisk}` : t.outsideZone}</div>
-          </div>
-        )}
-        {/* Status chips */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <div className="rounded-lg border p-3 bg-white flex items-center gap-3">
-            <span className={`w-2.5 h-2.5 rounded-full ${coords ? 'bg-green-500' : 'bg-yellow-400'}`}></span>
-            <div>
-              <div className="text-sm font-medium">GPS</div>
-              <div className="text-xs text-gray-500">{coords ? `Lat ${coords.latitude?.toFixed(5)}, Lng ${coords.longitude?.toFixed(5)}` : 'Awaiting location…'}</div>
-            </div>
-          </div>
-          <div className="rounded-lg border p-3 bg-white flex items-center gap-3">
-            <span className={`w-2.5 h-2.5 rounded-full ${backendStatus === 'online' ? 'bg-green-500' : backendStatus === 'checking' ? 'bg-yellow-400' : 'bg-red-500'}`}></span>
-            <div>
-              <div className="text-sm font-medium">Backend</div>
-              <div className="text-xs text-gray-500">{backendStatus}</div>
-            </div>
-          </div>
-          <div className="rounded-lg border p-3 bg-white flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">Queued Alerts</div>
-              <div className="text-xs text-gray-500">Auto-retry every 8s</div>
-            </div>
-            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full bg-gray-100 text-sm font-semibold text-gray-700">
-              {(() => { try { return JSON.parse(localStorage.getItem('panicQueue')||'[]').length } catch { return 0 } })()}
-            </span>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 dark:border-gray-700 shadow-lg rounded-2xl p-6 md:p-8 border border-transparent">
-          {/* Digital ID (DID) */}
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">Digital ID</h3>
-            {didToken ? (
-              <div className="text-sm text-green-700 dark:text-green-400 mb-2">Active token present.</div>
-            ) : (
-              <div className="text-sm text-yellow-700 mb-2">No active token. Issue one for secured alerts.</div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
-              <label className="text-sm">Doc Type
-                <select value={kycType} onChange={e=>setKycType(e.target.value)} className="w-full border rounded p-2">
-                  <option value="passport">Passport</option>
-                  <option value="aadhaar">Aadhaar</option>
-                </select>
-              </label>
-              <label className="text-sm">Doc Number
-                <input value={kycNumber} onChange={e=>setKycNumber(e.target.value)} placeholder="Enter number" className="w-full border rounded p-2" />
-              </label>
-              <label className="text-sm">Trip Days
-                <input type="number" min={1} max={60} value={tripDays} onChange={e=>setTripDays(e.target.value)} className="w-full border rounded p-2" />
-              </label>
-              <button onClick={issueDid} disabled={loading || !kycNumber} className={`w-full py-2 rounded text-white font-semibold ${loading?"bg-gray-400":"bg-emerald-600 hover:bg-emerald-700"}`}>Issue ID</button>
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button onClick={verifyDid} disabled={loading || !didToken} className={`px-3 py-2 rounded border ${didToken?"border-blue-600 text-blue-700 hover:bg-blue-50":"border-gray-300 text-gray-400"}`}>Verify ID</button>
-              <button onClick={clearDid} className="px-3 py-2 rounded border border-red-600 text-red-700 hover:bg-red-50">Clear ID</button>
-            </div>
-          </div>
-          {/* My ID card */}
-          <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-            <div className="md:col-span-2">
-              <h3 className="text-lg font-semibold text-gray-800">{t.myId}</h3>
-              <p className="text-sm text-gray-600">{t.showToResponders}</p>
-              <div className="mt-2 text-sm">
-                <div>{t.touristId}: <span className="font-mono">{touristId || '—'}</span></div>
-                <div>{t.deviceId}: <span className="font-mono">{deviceId || '—'}</span></div>
-              </div>
-            </div>
-            <div className="flex justify-center">
-              <div className="bg-white dark:bg-gray-900 p-2 rounded-lg border dark:border-gray-700">
-                <QRCode value={JSON.stringify({ touristId, deviceId })} size={120} />
-              </div>
-            </div>
-          </div>
-
-          {/* Emergency Contacts */}
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">{t.contacts}</h3>
-            <div className="grid grid-cols-3 gap-3 text-sm">
-              {contacts.map((c, idx) => (
-                <a key={idx} href={`tel:${c.phone}`} className="text-center border rounded-lg py-3 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-700">
-                  <div className="font-semibold">{lang === 'as' ? c.labelAs : c.labelEn}</div>
-                  <div className="text-xs text-gray-500">{c.phone}</div>
-                </a>
+        {/* Drawer */}
+        <Drawer
+          variant={isMobile ? "temporary" : "persistent"}
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          sx={{
+            width: isMobile ? '100%' : 280,
+            flexShrink: 0,
+            '& .MuiDrawer-paper': {
+              width: isMobile ? '100%' : 280,
+              boxSizing: 'border-box',
+            },
+          }}
+        >
+          <Toolbar />
+          <Box sx={{ overflow: 'auto' }}>
+            <List>
+              {drawerItems.map((item) => (
+                <ListItem
+                  button
+                  key={item.id}
+                  selected={currentView === item.id}
+                  onClick={() => {
+                    setCurrentView(item.id);
+                    if (isMobile) setDrawerOpen(false);
+                  }}
+                >
+                  <ListItemIcon>{item.icon}</ListItemIcon>
+                  <ListItemText primary={item.label} />
+                </ListItem>
               ))}
-            </div>
-          </div>
+            </List>
+          </Box>
+        </Drawer>
 
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">{t.setup}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="border rounded-lg p-4">
-              <h3 className="font-semibold mb-2">{t.registerTourist}</h3>
-              <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="Name" className="w-full border rounded p-2 mb-2" />
-              <input value={phone} onChange={(e)=>setPhone(e.target.value)} placeholder={t.phone} className="w-full border rounded p-2 mb-2" />
-              <button onClick={registerTourist} disabled={loading} className={`w-full py-2 rounded text-white font-semibold ${loading?"bg-gray-400":"bg-blue-600 hover:bg-blue-700"}`}>Register</button>
-              {touristId && <p className="text-sm text-gray-600 mt-2">{t.touristId}: <span className="font-mono">{touristId}</span></p>}
-            </div>
-            <div className="border rounded-lg p-4">
-              <h3 className="font-semibold mb-2">{t.pairDevice}</h3>
-              <input value={bleAddress} onChange={(e)=>setBleAddress(e.target.value)} placeholder={t.bleOptional} className="w-full border rounded p-2 mb-2" />
-              <button onClick={pairDevice} disabled={loading || !touristId} className={`w-full py-2 rounded text-white font-semibold ${loading||!touristId?"bg-gray-400":"bg-indigo-600 hover:bg-indigo-700"}`}>Pair</button>
-              {deviceId && <p className="text-sm text-gray-600 mt-2">{t.deviceId}: <span className="font-mono">{deviceId}</span></p>}
-            </div>
-          </div>
-          <h1 className="text-3xl font-bold text-red-700 mb-3">🚨 {t.panic}</h1>
-          <p className="text-gray-700 mb-4">{t.tapToSend}</p>
-          <button
-            onClick={sendPanicAlert}
-            disabled={loading}
-            className={`w-full py-3 rounded-full text-white text-xl font-bold shadow-md transition-colors duration-300
-              ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"}`}
-          >
-            {loading ? "Sending..." : t.send}
-          </button>
+        {/* Main Content */}
+        <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
+          {currentView === 'dashboard' && (
+            <Box>
+              {/* Safety Score Banner */}
+              {typeof mobileScore === 'number' && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: mobileScore >= 700 ? 'success.light' : mobileScore >= 400 ? 'warning.light' : 'error.light' }}>
+                  <Typography variant="h6" gutterBottom>
+                    {t.safetyScore} ({currentRegion}): {mobileScore}/900
+                  </Typography>
+                  <Typography variant="body2">
+                    {currentRisk ? `${t.currentZoneRisk}: ${currentRisk}` : t.outsideZone}
+                  </Typography>
+                </Paper>
+              )}
 
-          {/* Soft alerts */}
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => sendSoftAlert('safe')}
-              className="w-full py-2 rounded border border-green-600 text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 dark:text-green-400 dark:border-green-700"
-            >
-              👍 I'm Safe
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => sendSoftAlert('low_battery')}
-              className="w-full py-2 rounded border border-yellow-600 text-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-700"
-            >
-              🔋 Low Battery
-            </button>
-          </div>
+              {/* Status Cards */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2, mb: 3 }}>
+                <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: coords ? 'success.main' : 'warning.main' }} />
+                  <Box>
+                    <Typography variant="subtitle2">GPS</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {coords ? `Lat ${coords.latitude?.toFixed(5)}, Lng ${coords.longitude?.toFixed(5)}` : 'Awaiting location…'}
+                    </Typography>
+                  </Box>
+                </Paper>
 
-          {coords && (
-            <p className="mt-4 text-gray-600">
-              📍 Your Location: Latitude {coords.latitude}, Longitude {coords.longitude}
-            </p>
+                <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: backendStatus === 'online' ? 'success.main' : backendStatus === 'checking' ? 'warning.main' : 'error.main' }} />
+                  <Box>
+                    <Typography variant="subtitle2">Backend</Typography>
+                    <Typography variant="caption" color="text.secondary">{backendStatus}</Typography>
+                  </Box>
+                </Paper>
+
+                <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box>
+                    <Typography variant="subtitle2">Queued Alerts</Typography>
+                    <Typography variant="caption" color="text.secondary">Auto-retry every 8s</Typography>
+                  </Box>
+                  <Chip label={(() => { try { return JSON.parse(localStorage.getItem('panicQueue')||'[]').length } catch { return 0 } })()} color="primary" />
+                </Paper>
+              </Box>
+
+              {/* GPS Tracking Toggle */}
+              <Paper sx={{ p: 2, mb: 3 }}>
+                <FormControlLabel
+                  control={<Switch checked={track} onChange={(e) => setTrack(e.target.checked)} />}
+                  label="GPS Tracking"
+                />
+                <Typography variant="caption" display="block" color="text.secondary">
+                  {lastGpsAt ? `Last ping: ${new Date(lastGpsAt).toLocaleTimeString()}` : 'Off'}
+                </Typography>
+              </Paper>
+
+              {/* Panic Alert Section */}
+              <Paper sx={{ p: 3, mb: 3, textAlign: 'center' }}>
+                <Typography variant="h4" color="error" gutterBottom>🚨 {t.panic}</Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>{t.tapToSend}</Typography>
+                <button
+                  onClick={sendPanicAlert}
+                  disabled={loading}
+                  style={{
+                    width: '100%',
+                    padding: '16px',
+                    backgroundColor: loading ? '#ccc' : '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '24px',
+                    fontSize: '18px',
+                    fontWeight: 'bold',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  {loading ? "Sending..." : t.send}
+                </button>
+                
+                {/* Soft Alerts */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mt: 2 }}>
+                  <button
+                    onClick={() => sendSoftAlert('safe')}
+                    disabled={loading}
+                    style={{
+                      padding: '12px',
+                      border: '1px solid #16a34a',
+                      color: '#16a34a',
+                      backgroundColor: 'transparent',
+                      borderRadius: '8px',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      fontSize: '14px',
+                      fontWeight: '500'
+                    }}
+                  >
+                    👍 I'm Safe
+                  </button>
+                  <button
+                    onClick={() => sendSoftAlert('low_battery')}
+                    disabled={loading}
+                    style={{
+                      padding: '12px',
+                      border: '1px solid #ca8a04',
+                      color: '#ca8a04',
+                      backgroundColor: 'transparent',
+                      borderRadius: '8px',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      fontSize: '14px',
+                      fontWeight: '500'
+                    }}
+                  >
+                    🔋 Low Battery
+                  </button>
+                </Box>
+
+                {coords && (
+                  <Typography variant="caption" display="block" sx={{ mt: 2, color: 'text.secondary' }}>
+                    📍 Your Location: Latitude {coords.latitude}, Longitude {coords.longitude}
+                  </Typography>
+                )}
+                {lastSentAt && (
+                  <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary' }}>
+                    {t.lastSent}: {new Date(lastSentAt).toLocaleString()}
+                  </Typography>
+                )}
+              </Paper>
+
+              {/* Message Display */}
+              {message && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: message.includes("successfully") ? 'success.light' : 'error.light', color: message.includes("successfully") ? 'success.contrastText' : 'error.contrastText' }}>
+                  <Typography variant="body2" fontWeight="bold">{message}</Typography>
+                </Paper>
+              )}
+            </Box>
           )}
-          {lastSentAt && (
-            <p className="mt-1 text-xs text-gray-500">{t.lastSent}: {new Date(lastSentAt).toLocaleString()}</p>
+
+          {currentView === 'alerts' && (
+            <Box>
+              <Typography variant="h5" gutterBottom>Alert History</Typography>
+              {renderAlertsTable()}
+            </Box>
           )}
 
-          {/* Share location link */}
-          <div className="mt-3 flex items-center gap-3">
-            <a href={mapShareUrl || '#'} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline dark:text-blue-400">
-              {t.shareLoc}
-            </a>
-            <button onClick={copyShareLink} className="text-sm border rounded px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-700">
-              {t.copyLink}
-            </button>
-          </div>
-
-          {message && (
-            <div
-              className={`mt-4 p-3 rounded-lg text-white font-semibold ${
-                message.includes("successfully") ? "bg-green-500" : "bg-red-500"
-              }`}
-            >
-              {message}
-            </div>
+          {currentView === 'security' && (
+            <Box>
+              <Typography variant="h5" gutterBottom>Digital ID</Typography>
+              <Paper sx={{ p: 3, mb: 3 }}>
+                {didToken ? (
+                  <Typography color="success.main" sx={{ mb: 2 }}>Active token present.</Typography>
+                ) : (
+                  <Typography color="warning.main" sx={{ mb: 2 }}>No active token. Issue one for secured alerts.</Typography>
+                )}
+                
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, 1fr)' }, gap: 2, mb: 2 }}>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Doc Type</Typography>
+                    <select value={kycType} onChange={e=>setKycType(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
+                      <option value="passport">Passport</option>
+                      <option value="aadhaar">Aadhaar</option>
+                    </select>
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Doc Number</Typography>
+                    <input value={kycNumber} onChange={e=>setKycNumber(e.target.value)} placeholder="Enter number" style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Trip Days</Typography>
+                    <input type="number" min={1} max={60} value={tripDays} onChange={e=>setTripDays(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'end' }}>
+                    <button onClick={issueDid} disabled={loading || !kycNumber} style={{ width: '100%', padding: '8px', backgroundColor: loading ? '#ccc' : '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer' }}>Issue ID</button>
+                  </Box>
+                </Box>
+                
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 2, mb: 2 }}>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Itinerary (notes)</Typography>
+                    <input value={itinerary} onChange={e=>setItinerary(e.target.value)} placeholder="e.g., Guwahati → Kaziranga → Majuli" style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Emergency Contacts (comma-separated)</Typography>
+                    <input value={emergencyContacts} onChange={e=>setEmergencyContacts(e.target.value)} placeholder="e.g., +91-98..., +91-88..." style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                </Box>
+                
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <button onClick={verifyDid} disabled={loading || !didToken} style={{ padding: '8px 16px', border: didToken ? '1px solid #2563eb' : '1px solid #ccc', color: didToken ? '#2563eb' : '#999', backgroundColor: 'transparent', borderRadius: '4px', cursor: didToken ? 'pointer' : 'not-allowed' }}>Verify ID</button>
+                  <button onClick={clearDid} style={{ padding: '8px 16px', border: '1px solid #dc2626', color: '#dc2626', backgroundColor: 'transparent', borderRadius: '4px', cursor: 'pointer' }}>Clear ID</button>
+                </Box>
+              </Paper>
+              
+              {/* My ID card */}
+              <Paper sx={{ p: 3, mb: 3 }}>
+                <Typography variant="h6" gutterBottom>{t.myId}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{t.showToResponders}</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 3, alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="body2"><strong>{t.touristId}:</strong> <span style={{ fontFamily: 'monospace' }}>{touristId || '—'}</span></Typography>
+                    <Typography variant="body2"><strong>{t.deviceId}:</strong> <span style={{ fontFamily: 'monospace' }}>{deviceId || '—'}</span></Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                    <Box sx={{ p: 1, border: '1px solid #e5e7eb', borderRadius: '8px', bgcolor: 'background.paper' }}>
+                      <QRCode value={JSON.stringify({ touristId, deviceId })} size={120} />
+                    </Box>
+                  </Box>
+                </Box>
+              </Paper>
+            </Box>
           )}
-        </div>
-      </main>
-      </div>
-    </div>
+
+          {currentView === 'location' && (
+            <Box>
+              <Typography variant="h5" gutterBottom>Location Services</Typography>
+              {/* Location content will go here */}
+            </Box>
+          )}
+
+          {currentView === 'contacts' && (
+            <Box>
+              <Typography variant="h5" gutterBottom>Emergency Contacts</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(3, 1fr)' }, gap: 2 }}>
+                {contacts.map((c, idx) => (
+                  <Paper key={idx} sx={{ p: 2, textAlign: 'center', cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => window.open(`tel:${c.phone}`)}>
+                    <Typography variant="subtitle2" gutterBottom>{lang === 'as' ? c.labelAs : c.labelEn}</Typography>
+                    <Typography variant="caption" color="text.secondary">{c.phone}</Typography>
+                  </Paper>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {currentView === 'settings' && (
+            <Box>
+              <Typography variant="h5" gutterBottom>Settings</Typography>
+              <Paper sx={{ p: 3, mb: 3 }}>
+                <Typography variant="h6" gutterBottom>Tourist Registration</Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)' }, gap: 2, mb: 3 }}>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Name</Typography>
+                    <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="Name" style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" gutterBottom>Phone</Typography>
+                    <input value={phone} onChange={(e)=>setPhone(e.target.value)} placeholder={t.phone} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                  </Box>
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" gutterBottom>Aadhaar (12 digits, required)</Typography>
+                  <input value={aadhaar} onChange={(e)=>setAadhaar(e.target.value)} placeholder={t.aadhaar || 'Aadhaar (12 digits, required)'} inputMode="numeric" maxLength={12} pattern="\\d{12}" style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                </Box>
+                <button onClick={registerTourist} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: loading ? '#ccc' : '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer', marginBottom: '16px' }}>Register Tourist</button>
+                {touristId && <Typography variant="body2" color="text.secondary">{t.touristId}: <span style={{ fontFamily: 'monospace' }}>{touristId}</span></Typography>}
+              </Paper>
+              
+              <Paper sx={{ p: 3, mb: 3 }}>
+                <Typography variant="h6" gutterBottom>Device Pairing</Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" gutterBottom>BLE Address (optional)</Typography>
+                  <input value={bleAddress} onChange={(e)=>setBleAddress(e.target.value)} placeholder={t.bleOptional} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} />
+                </Box>
+                <button onClick={pairDevice} disabled={loading || !touristId} style={{ width: '100%', padding: '12px', backgroundColor: loading || !touristId ? '#ccc' : '#7c3aed', color: 'white', border: 'none', borderRadius: '4px', cursor: loading || !touristId ? 'not-allowed' : 'pointer', marginBottom: '16px' }}>Pair Device</button>
+                {deviceId && <Typography variant="body2" color="text.secondary">{t.deviceId}: <span style={{ fontFamily: 'monospace' }}>{deviceId}</span></Typography>}
+              </Paper>
+              
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>Appearance</Typography>
+                <FormControlLabel
+                  control={<Switch checked={dark} onChange={(e) => setDark(e.target.checked)} />}
+                  label="Dark Mode"
+                />
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" gutterBottom>Language</Typography>
+                  <select value={lang} onChange={(e)=>setLang(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
+                    <option value="en">English</option>
+                    <option value="as">অসমীয়া (Assamese)</option>
+                    <option value="bn">বাংলা (Bengali)</option>
+                    <option value="brx">Bodo</option>
+                    <option value="mni">Manipuri</option>
+                    <option value="kha">Khasi</option>
+                    <option value="grt">Garo</option>
+                    <option value="lus">Mizo</option>
+                  </select>
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </Box>
+      </Box>
+    </ThemeProvider>
   );
 }
 

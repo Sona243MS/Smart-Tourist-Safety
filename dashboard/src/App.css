@@ -1,7 +1,15 @@
+/* Typography & Theme */
 .App {
   --brand-green: #16a34a;
   --brand-yellow: #f59e0b;
   --brand-red: #dc2626;
+  --brand-blue: #2563eb;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --bg: #ffffff;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  color: var(--text);
 }
 
 .App.dark {
@@ -16,11 +24,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.85);
   backdrop-filter: blur(6px);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 14px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.04);
 }
 
 .App.dark .topbar {
@@ -30,20 +39,30 @@
 
 .topbar .brand {
   font-weight: 700;
-  color: #111827;
+  color: var(--text);
+  letter-spacing: 0.2px;
 }
 
 .App.dark .topbar .brand { color: #f9fafb; }
 
-.topbar .actions button {
+.topbar .actions button,
+.controls button,
+.map-card-header button {
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   background: #fff;
   cursor: pointer;
+  transition: all 160ms ease;
 }
 
-.App.dark .topbar .actions button { background: #111827; color: #e5e7eb; border-color: #1f2937; }
+.App.dark .topbar .actions button,
+.App.dark .controls button,
+.App.dark .map-card-header button { background: #111827; color: #e5e7eb; border-color: #1f2937; }
+
+.topbar .actions button:hover,
+.controls button:hover,
+.map-card-header button:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
 
 .topbar .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 
@@ -52,9 +71,9 @@
 .badge.connecting { background: var(--brand-yellow); }
 .badge.disconnected { background: var(--brand-red); }
 
-.map-card { margin-top: 16px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.map-card { margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
 .App.dark .map-card { background: #0f172a; border-color: #111827; }
-.map-card-header { display:flex; align-items:center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }
+.map-card-header { display:flex; align-items:center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
 .App.dark .map-card-header { border-color: #111827; }
 .legend { display:flex; gap: 10px; font-size: 12px; color: #6b7280; }
 .App.dark .legend { color: #9ca3af; }
@@ -62,9 +81,7 @@
 .dot.red { background:#ef4444; }
 .dot.yellow { background:#f59e0b; }
 .dot.green { background:#22c55e; }
-.App {
-  text-align: center;
-}
+.App { text-align: center; }
 
 .App-logo {
   height: 40vmin;
@@ -103,7 +120,7 @@
 
 /* --- Custom Dashboard Styling --- */
 body {
-  background: linear-gradient(180deg, #fafbff 0%, #ffffff 60%);
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 60%);
 }
 
 .App h1 {
@@ -122,6 +139,22 @@ body {
   border: 1px solid #d1d5db; /* gray-300 */
   border-radius: 8px;
   background: #fff;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.controls input[type="text"] {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.controls select:focus,
+.controls input[type="text"]:focus {
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .controls button {
@@ -157,6 +190,10 @@ body {
   background: #f9fafb;
 }
 
+.alerts-table tbody tr:nth-child(even) {
+  background: #fcfcfd;
+}
+
 .alerts-table td {
   font-size: 14px;
 }
@@ -168,10 +205,12 @@ body {
   border: 1px solid #e5e7eb; /* gray-200 */
   background: #fff;
   cursor: pointer;
+  transition: all 160ms ease;
 }
 
 .alerts-table button:hover:not(:disabled) {
   background: #f3f4f6; /* gray-100 */
+  transform: translateY(-1px);
 }
 
 .alerts-table button:disabled {

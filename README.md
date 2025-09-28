@@ -142,3 +142,47 @@ To host Dashboard and Mobile under one Firebase project:
 5. Deploy:
    - `firebase deploy --only hosting:dashboard`
    - `firebase deploy --only hosting:mobile`
+
+## On-chain DID Anchoring (Polygon testnet)
+
+The backend supports optional EVM anchoring of issued Digital IDs. When enabled via environment variables, every `POST /did/issue` call will hash the DID issuance payload and attempt to call your Registry contract on-chain. The dashboard Anchors panel will show a "View on explorer" link if a transaction hash is available.
+
+### Environment variables (Render backend)
+
+- `CHAIN_NETWORK` – e.g., `polygon-amoy` (or `ethereum-sepolia`)
+- `CHAIN_EVM_RPC` – RPC endpoint, e.g., `https://polygon-amoy.g.alchemy.com/v2/<KEY>`
+- `CHAIN_PRIVATE_KEY` – Private key for the deployer/account (testnet). Keep this secret.
+- `CHAIN_REGISTRY_ADDRESS` – Deployed registry contract address.
+- `CHAIN_EXPLORER_TX` – Explorer base for tx links, e.g., `https://amoy.polygonscan.com/tx/`
+
+If these are not set, the backend falls back to local anchoring in `data/did-anchors.json`.
+
+### Expected Registry ABI
+
+The backend calls a single function on your registry. Solidity signature:
+
+```solidity
+function anchor(bytes32 digest, string memory didId) public returns (bool);
+```
+
+Minimal ABI used by the backend (ethers v6):
+
+```json
+[
+  "function anchor(bytes32 digest, string didId) public returns (bool)"
+]
+```
+
+### How it works
+
+- Backend computes a SHA-256 digest of `{ didId, kycHash, expiresAtISO }`.
+- If chain env is configured, it sends a transaction to `anchor(digest, didId)`.
+- Response stores `txHash` (if available) and marks anchor `status: anchored-onchain`.
+- The dashboard shows a link to `${CHAIN_EXPLORER_TX}${txHash}`.
+
+### Notes
+
+- Use a funded testnet account for `CHAIN_PRIVATE_KEY`.
+- Keep the private key only in Render environment variables.
+- For production, consider gas policies, rate limits, and retries.
+

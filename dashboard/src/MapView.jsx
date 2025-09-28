@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polygon, useMapEvents } from 'react-leaflet';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polygon, useMapEvents, Polyline, CircleMarker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -47,7 +47,7 @@ function ClickCatcher({ onClick }) {
   return null;
 }
 
-export default function MapView({ alerts, geofences, onMapClick, testMode }) {
+export default function MapView({ alerts, geofences, onMapClick, testMode, showLiveGps = false, gpsPings = [], gpsHistory = {}, fitGps = false }) {
   const positions = useMemo(() =>
     (alerts || [])
       .filter(a => typeof a.latitude === 'number' && typeof a.longitude === 'number')
@@ -56,6 +56,80 @@ export default function MapView({ alerts, geofences, onMapClick, testMode }) {
 
   const center = positions[0] || [20.5937, 78.9629]; // default: India
 
+  // Build GPS overlays
+  const gpsLatestPositions = useMemo(() => {
+    const list = [];
+    (gpsPings || []).forEach(p => {
+      if (typeof p.latitude === 'number' && typeof p.longitude === 'number') {
+        const key = p.touristId || p.deviceId || 'anon';
+        list.push({ key, lat: p.latitude, lng: p.longitude, at: p.at });
+      }
+    });
+    return list;
+  }, [gpsPings]);
+
+  const gpsTrails = useMemo(() => {
+    const entries = Object.entries(gpsHistory || {});
+    return entries.map(([key, arr], idx) => {
+      const positions = (arr || []).map(p => [p.latitude, p.longitude]).filter(pt => typeof pt[0] === 'number' && typeof pt[1] === 'number');
+      return { key, positions, colorIdx: idx };
+    });
+  }, [gpsHistory]);
+
+  function colorForIdx(i) {
+    const palette = ['#2563eb', '#16a34a', '#f59e0b', '#e11d48', '#7c3aed', '#0ea5e9'];
+    return palette[i % palette.length];
+  }
+
+  // Smooth animation for GPS markers: interpolate to new points over 1s
+  const [animPositions, setAnimPositions] = useState({}); // key -> {lat,lng}
+  const animRef = useRef({ running: false, start: 0, from: {}, to: {} });
+
+  useEffect(() => {
+    if (!showLiveGps) return;
+    const nowTargets = {};
+    gpsLatestPositions.forEach(p => { nowTargets[p.key] = { lat: p.lat, lng: p.lng }; });
+    const from = { ...animPositions };
+    // For keys unseen before, start from their target (no animation jitter)
+    Object.keys(nowTargets).forEach(k => {
+      if (!from[k]) from[k] = { ...nowTargets[k] };
+    });
+    animRef.current = { running: true, start: performance.now(), from, to: nowTargets };
+
+    let rafId = 0;
+    const duration = 1000;
+    const ease = (t) => t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; // easeInOut
+    const step = (ts) => {
+      const t = Math.min(1, (ts - animRef.current.start) / duration);
+      const e = ease(t);
+      const next = {};
+      Object.keys(animRef.current.to).forEach(k => {
+        const a = animRef.current.from[k] || animRef.current.to[k];
+        const b = animRef.current.to[k];
+        next[k] = { lat: a.lat + (b.lat - a.lat) * e, lng: a.lng + (b.lng - a.lng) * e };
+      });
+      setAnimPositions(next);
+      if (t < 1) {
+        rafId = requestAnimationFrame(step);
+      } else {
+        animRef.current.running = false;
+      }
+    };
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gpsLatestPositions.map(p=>p.key+':'+p.lat+','+p.lng).join('|'), showLiveGps]);
+
+  // Fit to GPS trails when requested
+  const fitPositions = useMemo(() => {
+    if (!fitGps || !showLiveGps) return positions;
+    const extra = [];
+    Object.values(gpsHistory || {}).forEach(arr => {
+      (arr || []).forEach(p => { if (typeof p.latitude==='number' && typeof p.longitude==='number') extra.push([p.latitude, p.longitude]); });
+    });
+    return positions.concat(extra);
+  }, [fitGps, showLiveGps, positions, gpsHistory]);
+
   return (
     <div style={{ height: 400, width: '100%', marginTop: 16 }}>
       <MapContainer center={center} zoom={5} style={{ height: '100%', width: '100%' }}>
@@ -63,7 +137,7 @@ export default function MapView({ alerts, geofences, onMapClick, testMode }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <FitBounds positions={positions} />
+        <FitBounds positions={fitPositions} />
         <ClickCatcher onClick={onMapClick} />
         {(geofences || []).map((g) => (
           <Polygon key={g.id}
@@ -79,6 +153,41 @@ export default function MapView({ alerts, geofences, onMapClick, testMode }) {
             </Popup>
           </Polygon>
         ))}
+        {/* GPS Trails (mini-paths) */}
+        {showLiveGps && gpsTrails.map(trail => (
+          trail.positions.length >= 2 ? (
+            <Polyline key={`trail-${trail.key}`} positions={trail.positions} pathOptions={{ color: colorForIdx(trail.colorIdx), weight: 3, opacity: 0.7 }} />
+          ) : null
+        ))}
+        {/* Latest GPS markers */}
+        {showLiveGps && gpsLatestPositions.map((p, idx) => {
+          const anim = animPositions[p.key] || { lat: p.lat, lng: p.lng };
+          return (
+          <CircleMarker key={`gps-${p.key}`} center={[anim.lat, anim.lng]} radius={6} pathOptions={{ color: colorForIdx(idx), fillColor: colorForIdx(idx), fillOpacity: 0.8 }}>
+            <Popup>
+              <div>
+                <div><strong>GPS</strong></div>
+                <div><strong>Time:</strong> {new Date(p.at).toLocaleString()}</div>
+                <div><strong>Lat:</strong> {anim.lat.toFixed(6)}</div>
+                <div><strong>Lng:</strong> {anim.lng.toFixed(6)}</div>
+                <div><strong>Key:</strong> <code>{p.key}</code></div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        );})}
+        {/* Legend for GPS colors */}
+        {showLiveGps && (
+          <div style={{ position:'absolute', bottom: 10, right: 10, background:'rgba(255,255,255,0.9)', padding: 6, borderRadius: 6, border:'1px solid #ddd', maxHeight: 120, overflow:'auto' }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>GPS Legend</div>
+            {gpsLatestPositions.slice(0,10).map((p, idx) => (
+              <div key={`legend-${p.key}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ width: 10, height: 10, background: colorForIdx(idx), borderRadius: 2 }} />
+                <code style={{ fontSize: 12 }}>{p.key}</code>
+              </div>
+            ))}
+            {gpsLatestPositions.length > 10 && <div style={{ fontSize: 12, color:'#6b7280' }}>+{gpsLatestPositions.length - 10} more…</div>}
+          </div>
+        )}
         {(alerts || []).map((a) => (
           <Marker key={a.id} position={[a.latitude, a.longitude]}>
             <Popup>

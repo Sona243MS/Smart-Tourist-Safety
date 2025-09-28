@@ -126,10 +126,14 @@ function init() {
           regionId: 'assam',
           riskLevel: 'yellow',
           polygon: [
-            [26.585, 93.350],
-            [26.585, 93.430],
-            [26.510, 93.430],
-            [26.510, 93.350],
+            // Approx polygon around Kohora range area
+            [26.5892, 93.3851],
+            [26.5785, 93.4237],
+            [26.5528, 93.4379],
+            [26.5256, 93.4174],
+            [26.5178, 93.3781],
+            [26.5352, 93.3526],
+            [26.5630, 93.3491],
           ],
           meta: { placeId: 'kaziranga' },
         },
@@ -139,10 +143,13 @@ function init() {
           regionId: 'assam',
           riskLevel: 'yellow',
           polygon: [
-            [26.172, 91.698],
-            [26.172, 91.705],
-            [26.166, 91.705],
-            [26.166, 91.698],
+            // Nilachal Hill area around the temple complex
+            [26.1743, 91.6987],
+            [26.1732, 91.7028],
+            [26.1704, 91.7059],
+            [26.1671, 91.7038],
+            [26.1663, 91.6991],
+            [26.1687, 91.6969],
           ],
           meta: { placeId: 'kamakhya' },
         },
@@ -152,10 +159,13 @@ function init() {
           regionId: 'assam',
           riskLevel: 'yellow',
           polygon: [
-            [26.192, 91.749],
-            [26.192, 91.754],
-            [26.188, 91.754],
-            [26.188, 91.749],
+            // Peacock Island shape approximation in Brahmaputra
+            [26.1932, 91.7501],
+            [26.1921, 91.7532],
+            [26.1900, 91.7541],
+            [26.1882, 91.7529],
+            [26.1888, 91.7497],
+            [26.1909, 91.7487],
           ],
           meta: { placeId: 'umananda' },
         },
@@ -165,10 +175,14 @@ function init() {
           regionId: 'assam',
           riskLevel: 'yellow',
           polygon: [
-            [26.980, 94.140],
-            [26.980, 94.300],
-            [26.820, 94.300],
-            [26.820, 94.140],
+            // Broader boundary covering central Majuli area (approx)
+            [26.9800, 94.1600],
+            [26.9600, 94.2600],
+            [26.9050, 94.3050],
+            [26.8450, 94.2800],
+            [26.8250, 94.2100],
+            [26.8450, 94.1500],
+            [26.9000, 94.1300],
           ],
           meta: { placeId: 'majuli' },
         },
@@ -178,10 +192,14 @@ function init() {
           regionId: 'assam',
           riskLevel: 'yellow',
           polygon: [
-            [26.258, 91.961],
-            [26.258, 92.010],
-            [26.220, 92.010],
-            [26.220, 91.961],
+            // Sanctuary core approximate boundary
+            [26.2805, 91.9720],
+            [26.2740, 92.0000],
+            [26.2550, 92.0100],
+            [26.2350, 91.9960],
+            [26.2300, 91.9720],
+            [26.2440, 91.9580],
+            [26.2650, 91.9570],
           ],
           meta: { placeId: 'pobitora' },
         },
@@ -195,10 +213,10 @@ function init() {
   }
 }
 
-function registerTourist({ name, phone }) {
+function registerTourist({ name, phone, aadhaar }) {
   const id = randomUUID();
   const createdAt = new Date().toISOString();
-  state.tourists.push({ id, name: name || null, phone: phone || null, createdAt });
+  state.tourists.push({ id, name: name || null, phone: phone || null, aadhaar: aadhaar || null, createdAt });
   persist();
   return { id, createdAt };
 }
